@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notes App - Modern AI Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --bg: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            --card-bg: white;
+            --text: #1e293b;
+            --gray: #64748b;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
+        .container { max-width: 900px; margin: 0 auto; background: var(--card-bg); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); overflow: hidden; }
+        h1 { text-align: center; padding: 1.8rem 2rem; background: linear-gradient(90deg, var(--primary), var(--primary-dark)); color: white; margin: 0; font-weight: 700; }
+        .tabs { display: flex; border-bottom: 1px solid #e2e8f0; }
+        .tab { flex: 1; padding: 1rem; text-align: center; cursor: pointer; font-weight: 600; color: var(--gray); transition: all 0.3s; }
+        .tab.active { color: var(--primary); border-bottom: 3px solid var(--primary); background: rgba(99,102,241,0.05); }
+        .tab-content { padding: 2rem; }
+        .note-form { display: grid; gap: 1rem; margin-bottom: 2rem; }
+        input, textarea { padding: 1rem; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 1rem; transition: border-color 0.3s; }
+        input:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+        .form-buttons { display: flex; gap: 1rem; flex-wrap: wrap; }
+        button { padding: 0.9rem 1.5rem; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); transform: translateY(-2px); }
+        .btn-secondary { background: #e2e8f0; color: var(--text); }
+        .btn-secondary:hover { background: #cbd5e1; }
+        .btn-ai { background: linear-gradient(90deg, #8b5cf6, #d946ef); color: white; }
+        .btn-ai:hover { background: linear-gradient(90deg, #7c3aed, #c026d3); }
+        .search-bar input { margin-bottom: 1.5rem; }
+        .note-list { display: grid; gap: 1.2rem; }
+        .note-item { background: var(--card-bg); border-radius: 12px; padding: 1.5rem; border: 1px solid #e2e8f0; transition: all 0.3s; animation: fadeInUp 0.5s ease-out; }
+        .note-item:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.1); border-color: var(--primary); }
+        .note-item h3 { margin-bottom: 0.8rem; color: var(--primary-dark); }
+        .note-item p { color: #475569; line-height: 1.6; white-space: pre-wrap; }
+        .note-actions { margin-top: 1.2rem; display: flex; gap: 0.8rem; flex-wrap: wrap; }
+        .note-actions button { padding: 0.6rem 1.2rem; font-size: 0.9rem; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .removing { animation: fadeOut 0.5s forwards; }
+        @keyframes fadeOut { to { opacity: 0; transform: translateY(-20px); } }
+        #ai-loading { display: none; text-align: center; color: var(--primary); font-weight: 500; margin: 1rem 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Notes App - Modern AI Edition</h1>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('active')">Catatan Aktif</div>
+            <div class="tab" onclick="switchTab('archived')">Arsip</div>
+        </div>
+
+        <div id="active-tab" class="tab-content">
+            <div class="note-form">
+                <input type="text" id="note-title" placeholder="Judul catatan...">
+                <textarea id="note-content" placeholder="Tulis isi catatan di sini..." rows="5"></textarea>
+                <div class="form-buttons">
+                    <button class="btn-primary" onclick="addNote()">Tambah Catatan</button>
+                    <button class="btn-ai" onclick="generateWithAI()">Generate / Tanya AI (Gemini)</button>
+                </div>
+                <div id="ai-loading">Sedang generate jawaban lengkap... (biasanya aga lama dikit masih pemula wkwkwkwk)</div>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="Cari catatan..." onkeyup="searchNotes()">
+            </div>
+            <div class="note-list" id="active-notes-list"></div>
+        </div>
+
+        <div id="archived-tab" class="tab-content" style="display:none;">
+            <div class="search-bar">
+                <input type="text" id="search-archived" placeholder="Cari di arsip..." onkeyup="searchArchived()">
+            </div>
+            <div class="note-list" id="archived-notes-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const GEMINI_API_KEY = "AIzaSyADKAWmVVtpR4sk3dwgtxO4UlaOX7qTqek";
+        const GEMINI_MODEL = "gemini-2.5-flash";  // Bisa ganti ke "gemini-2.5-pro" kalau quota masih ada
+        const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+        let notes = JSON.parse(localStorage.getItem('notes')) || [];
+        let archivedNotes = JSON.parse(localStorage.getItem('archivedNotes')) || [];
+
+        function renderNotes(listId, noteArray, isArchived = false) {
+            const list = document.getElementById(listId);
+            list.innerHTML = '';
+            noteArray.forEach((note, index) => {
+                const div = document.createElement('div');
+                div.className = 'note-item';
+                div.innerHTML = `
+                    <h3>${note.title}</h3>
+                    <p>${note.content}</p>
+                    <div class="note-actions">
+                        ${!isArchived ? `<button class="btn-secondary" onclick="archiveNote(${index})">Arsipkan</button>` : `<button class="btn-secondary" onclick="unarchiveNote(${index})">Kembalikan</button>`}
+                        <button class="btn-secondary" onclick="editNote(${index}, ${isArchived})">Edit</button>
+                        <button class="btn-secondary" onclick="deleteNote(${index}, ${isArchived})">Hapus</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function addNote(title = '', content = '') {
+            title = (title || document.getElementById('note-title').value).trim();
+            content = (content || document.getElementById('note-content').value).trim();
+            if (title && content) {
+                notes.push({ title, content });
+                saveAndRender();
+                if (!title.includes('AI Gemini')) {
+                    document.getElementById('note-title').value = '';
+                    document.getElementById('note-content').value = '';
+                }
+            }
+        }
+
+        async function generateWithAI(continueFrom = '') {
+            let promptInput = continueFrom ? continueFrom : prompt("Tanya apa saja ke AI Gemini!\nContoh:\n- Manfaat olahraga pagi hari + tips prakteknya\n- Saran produktif kuliah sambil kerja part-time\n- Cara mengatasi malas belajar");
+            if (!promptInput) return;
+
+            const loading = document.getElementById('ai-loading');
+            loading.style.display = 'block';
+
+            try {
+                const fullPrompt = continueFrom ? promptInput : `Kamu adalah asisten pintar yang membantu. Jawab dalam bahasa Indonesia natural, ramah, lengkap, dan informatif.
+Berikan saran praktis, contoh, tips, poin-poin jelas. Hindari terlalu panjang tapi pastikan full & tidak terpotong.
+Format persis:
+JUDUL: [judul menarik]
+ISI:
+- Poin 1: [detail + saran]
+- Poin 2: [detail + contoh]
+dst (buat sebanyak yang perlu agar lengkap)
+
+Pertanyaan: ${promptInput}`;
+
+                const response = await fetch(GEMINI_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: fullPrompt }] }],
+                        generationConfig: {
+                            temperature: 0.6,
+                            maxOutputTokens: 8192  // Naikkan besar agar jarang potong
+                        }
+                    })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error?.message || `HTTP error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+
+                let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                if (!text) throw new Error("Tidak ada teks dari Gemini");
+
+                const finishReason = data.candidates?.[0]?.finishReason;
+                if (finishReason === 'MAX_TOKENS' || text.endsWith('...') || text.length < 200) {
+                    alert('Jawaban terpotong karena limit token. Mau lanjutkan otomatis?');
+                    generateWithAI(`Lanjutkan jawaban sebelumnya dari sini, buat lengkap tanpa potong lagi:\n${text}`);
+                    return;
+                }
+
+                // Parsing
+                let title = `AI Gemini: ${promptInput.slice(0, 60)}${promptInput.length > 60 ? '...' : ''}`;
+                let content = text;
+
+                const judulMatch = text.match(/JUDUL:\s*(.+?)(?=\nISI:|$)/is);
+                if (judulMatch) title = judulMatch[1].trim();
+
+                const isiMatch = text.match(/ISI:([\s\S]+)/i);
+                if (isiMatch) content = isiMatch[1].trim();
+
+                if (content.length < 100 || content === text) {
+                    content = text.replace(/JUDUL:.*?\n/i, '').trim();
+                }
+
+                addNote(title, content);
+            } catch (err) {
+                alert(`Error AI: ${err.message}\n\nTips:\n- Coba buat API key baru di https://aistudio.google.com/app/apikey (gratis)\n- Ganti model ke gemini-2.5-pro kalau quota habis\n- Prompt lebih singkat dulu`);
+                console.error('Gemini Error:', err);
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        function archiveNote(index) { const note = notes.splice(index, 1)[0]; archivedNotes.push(note); saveAndRender(); }
+        function unarchiveNote(index) { const note = archivedNotes.splice(index, 1)[0]; notes.push(note); saveAndRender(); }
+        function editNote(index, isArchived) {
+            const arr = isArchived ? archivedNotes : notes;
+            const note = arr[index];
+            document.getElementById('note-title').value = note.title;
+            document.getElementById('note-content').value = note.content;
+            deleteNote(index, isArchived);
+            switchTab('active');
+        }
+        function deleteNote(index, isArchived) {
+            const listId = isArchived ? 'archived-notes-list' : 'active-notes-list';
+            const arr = isArchived ? archivedNotes : notes;
+            const item = document.querySelectorAll(`#${listId} .note-item`)[index];
+            if (item) item.classList.add('removing');
+            setTimeout(() => {
+                arr.splice(index, 1);
+                saveAndRender(isArchived ? 'archived' : 'active');
+            }, 500);
+        }
+        function searchNotes() {
+            const q = document.getElementById('search-input').value.toLowerCase().trim();
+            const filtered = notes.filter(n => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q));
+            renderNotes('active-notes-list', filtered);
+        }
+        function searchArchived() {
+            const q = document.getElementById('search-archived').value.toLowerCase().trim();
+            const filtered = archivedNotes.filter(n => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q));
+            renderNotes('archived-notes-list', filtered, true);
+        }
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            const activeTab = document.querySelector(tab === 'active' ? '.tab:first-child' : '.tab:last-child');
+            activeTab.classList.add('active');
+            document.getElementById(`${tab}-tab`).style.display = 'block';
+        }
+        function saveAndRender(activeTab = null) {
+            localStorage.setItem('notes', JSON.stringify(notes));
+            localStorage.setItem('archivedNotes', JSON.stringify(archivedNotes));
+            renderNotes('active-notes-list', notes);
+            renderNotes('archived-notes-list', archivedNotes, true);
+            if (activeTab) switchTab(activeTab);
+        }
+
+        renderNotes('active-notes-list', notes);
+        renderNotes('archived-notes-list', archivedNotes, true);
+    </script>
+</body>
+</html>
